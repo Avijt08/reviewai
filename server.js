@@ -63,75 +63,11 @@ ${code}`;
           const data = JSON.parse(body);
           if (data.error) return reject(new Error(data.error.message));
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          // Strip markdown, extract just the JSON object
           let clean = text.replace(/```json|```/gi, '').trim();
-          // Find the JSON object boundaries
           const start = clean.indexOf('{');
           const end = clean.lastIndexOf('}');
           if (start === -1 || end === -1) throw new Error('No JSON found in response');
           clean = clean.substring(start, end + 1);
-          resolve(JSON.parse(clean));
-        } catch(e) {
-          reject(new Error('Failed to parse Gemini response: ' + e.message));
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.write(payload);
-    req.end();
-  });
-}
-
-const server = http.createServer(async (req, res) => {
-  setCORS(res);
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    return res.end();
-  }
-
-  const url = req.url.split('?')[0];
-
-  if (req.method === 'GET' && url === '/api/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({
-      status: 'ok',
-      version: '1.0.0',
-      engine: 'gemini-2.5-flash',
-      hasKey: !!GEMINI_API_KEY
-    }));
-  }
-
-  if (req.method === 'POST' && url === '/api/review') {
-    const body = await readBody(req);
-
-    if (!body.code || !body.code.trim()) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: 'No code provided' }));
-    }
-
-    if (!GEMINI_API_KEY) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: 'GEMINI_API_KEY not set in Railway variables' }));
-    }
-
-    try {
-      const result = await callGemini(body.code, body.language, body.categories);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success: true, result }));
-    } catch(e) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: 'Review failed', message: e.message }));
-    }
-  }
-
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Not found' }));
-});
-
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`ReviewAI API running on port ${PORT}`);
-  console.log(`Engine: Gemini 2.0 Flash (Free)`);
-  console.log(`API key set: ${!!GEMINI_API_KEY}`);
-});
+          // Fix common Gemini JSON issues - unescaped special chars
+          clean = clean
+            .replace(/[
