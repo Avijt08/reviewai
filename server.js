@@ -13,38 +13,52 @@ function setCORS(res) {
 function readBody(req) {
   return new Promise((resolve) => {
     let data = '';
-    req.on('data', c => data += c);
-    req.on('end', () => {
+    req.on('data', function(c) { data += c; });
+    req.on('end', function() {
       try { resolve(JSON.parse(data)); }
-      catch { resolve({}); }
+      catch(e) { resolve({}); }
     });
   });
 }
 
+function extractJSON(text) {
+  // Remove markdown code blocks
+  var clean = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
+  // Find first { and last }
+  var start = clean.indexOf('{');
+  var end = clean.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('No JSON object found in response');
+  clean = clean.substring(start, end + 1);
+  // Remove control characters that break JSON parsing
+  var result = '';
+  for (var i = 0; i < clean.length; i++) {
+    var code = clean.charCodeAt(i);
+    if (code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127)) {
+      result += clean[i];
+    }
+  }
+  return JSON.parse(result);
+}
+
 function callGemini(code, language, categories) {
-  return new Promise((resolve, reject) => {
-    const lang = language || 'JavaScript';
-    const cats = (categories || ['bugs','security','perf','style']).join('|');
+  return new Promise(function(resolve, reject) {
+    var lang = language || 'JavaScript';
+    var cats = (categories || ['bugs','security','perf','style']).join('|');
 
-    const prompt = `You are an expert ${lang} code reviewer. Analyze the following code and return ONLY valid JSON with no markdown, no backticks, no extra text whatsoever. Use exactly this structure:
-{"score":<number 0-100>,"summary":"<one sentence assessment>","issues":[{"type":"<${cats}>","severity":"<high|medium|low>","title":"<short title>","description":"<specific fix suggestion>"}]}
+    var prompt = 'You are an expert ' + lang + ' code reviewer. Analyze the following code and return ONLY valid JSON with absolutely no markdown, no backticks, no explanation. Use exactly this structure: {"score":<number 0-100>,"summary":"<one sentence>","issues":[{"type":"<' + cats + '>","severity":"<high|medium|low>","title":"<short title>","description":"<fix suggestion>"}]}. Give 2-5 issues.\n\nCode:\n' + code;
 
-Give 2-5 most important issues. Be specific and actionable.
-
-Code to review:
-${code}`;
-
-    const payload = JSON.stringify({
+    var payload = JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 1000
+        maxOutputTokens: 1000,
+        responseMimeType: 'application/json'
       }
     });
 
-    const path = `/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    var path = '/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_API_KEY;
 
-    const options = {
+    var options = {
       hostname: 'generativelanguage.googleapis.com',
       port: 443,
       path: path,
@@ -55,19 +69,78 @@ ${code}`;
       }
     };
 
-    const req = https.request(options, (res) => {
-      let body = '';
-      res.on('data', chunk => body += chunk);
-      res.on('end', () => {
+    var req = https.request(options, function(res) {
+      var body = '';
+      res.on('data', function(chunk) { body += chunk; });
+      res.on('end', function() {
         try {
-          const data = JSON.parse(body);
+          var data = JSON.parse(body);
           if (data.error) return reject(new Error(data.error.message));
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          let clean = text.replace(/```json|```/gi, '').trim();
-          const start = clean.indexOf('{');
-          const end = clean.lastIndexOf('}');
-          if (start === -1 || end === -1) throw new Error('No JSON found in response');
-          clean = clean.substring(start, end + 1);
-          // Fix common Gemini JSON issues - unescaped special chars
-          clean = clean
-            .replace(/[
+          var text = '';
+          if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
+            text = data.candidates[0].content.parts[0].text || '';
+          }
+          var parsed = extractJSON(text);
+          resolve(parsed);
+        } catch(e) {
+          reject(new Error('Failed to parse Gemini response: ' + e.message));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+var server = http.createServer(function(req, res) {
+  setCORS(res);
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    return res.end();
+  }
+
+  var url = req.url.split('?')[0];
+
+  if (req.method === 'GET' && url === '/api/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      status: 'ok',
+      version: '1.0.0',
+      engine: 'gemini-2.5-flash',
+      hasKey: !!GEMINI_API_KEY
+    }));
+  }
+
+  if (req.method === 'POST' && url === '/api/review') {
+    readBody(req).then(function(body) {
+      if (!body.code || !body.code.trim()) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'No code provided' }));
+      }
+      if (!GEMINI_API_KEY) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'GEMINI_API_KEY not set' }));
+      }
+      callGemini(body.code, body.language, body.categories).then(function(result) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, result: result }));
+      }).catch(function(e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Review failed', message: e.message }));
+      });
+    });
+    return;
+  }
+
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not found' }));
+});
+
+server.listen(PORT, '0.0.0.0', function() {
+  console.log('ReviewAI API running on port ' + PORT);
+  console.log('Engine: gemini-2.5-flash');
+  console.log('API key set: ' + !!GEMINI_API_KEY);
+});
