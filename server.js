@@ -11,8 +11,8 @@ function setCORS(res) {
 }
 
 function readBody(req) {
-  return new Promise((resolve) => {
-    let data = '';
+  return new Promise(function(resolve) {
+    var data = '';
     req.on('data', function(c) { data += c; });
     req.on('end', function() {
       try { resolve(JSON.parse(data)); }
@@ -21,38 +21,39 @@ function readBody(req) {
   });
 }
 
-function extractJSON(text) {
-  // Remove markdown code blocks
-  var clean = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
-  // Find first { and last }
-  var start = clean.indexOf('{');
-  var end = clean.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('No JSON object found in response');
-  clean = clean.substring(start, end + 1);
-  // Remove control characters that break JSON parsing
-  var result = '';
-  for (var i = 0; i < clean.length; i++) {
-    var code = clean.charCodeAt(i);
-    if (code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127)) {
-      result += clean[i];
-    }
-  }
-  return JSON.parse(result);
-}
-
 function callGemini(code, language, categories) {
   return new Promise(function(resolve, reject) {
     var lang = language || 'JavaScript';
-    var cats = (categories || ['bugs','security','perf','style']).join('|');
 
-    var prompt = 'You are an expert ' + lang + ' code reviewer. Analyze the following code and return ONLY valid JSON with absolutely no markdown, no backticks, no explanation. Use exactly this structure: {"score":<number 0-100>,"summary":"<one sentence>","issues":[{"type":"<' + cats + '>","severity":"<high|medium|low>","title":"<short title>","description":"<fix suggestion>"}]}. Give 2-5 issues.\n\nCode:\n' + code;
+    var prompt = 'Review this ' + lang + ' code and identify issues.\n\nCode:\n' + code + '\n\nFor each issue found, classify it as bugs/security/perf/style, with severity high/medium/low. Give an overall quality score 0-100 and a one sentence summary.';
 
     var payload = JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.1,
         maxOutputTokens: 1000,
-        responseMimeType: 'application/json'
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            score: { type: 'INTEGER' },
+            summary: { type: 'STRING' },
+            issues: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  type: { type: 'STRING' },
+                  severity: { type: 'STRING' },
+                  title: { type: 'STRING' },
+                  description: { type: 'STRING' }
+                },
+                required: ['type', 'severity', 'title', 'description']
+              }
+            }
+          },
+          required: ['score', 'summary', 'issues']
+        }
       }
     });
 
@@ -76,14 +77,11 @@ function callGemini(code, language, categories) {
         try {
           var data = JSON.parse(body);
           if (data.error) return reject(new Error(data.error.message));
-          var text = '';
-          if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
-            text = data.candidates[0].content.parts[0].text || '';
-          }
-          var parsed = extractJSON(text);
+          var text = data.candidates[0].content.parts[0].text || '';
+          var parsed = JSON.parse(text);
           resolve(parsed);
         } catch(e) {
-          reject(new Error('Failed to parse Gemini response: ' + e.message));
+          reject(new Error('Parse error: ' + e.message));
         }
       });
     });
@@ -106,12 +104,7 @@ var server = http.createServer(function(req, res) {
 
   if (req.method === 'GET' && url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({
-      status: 'ok',
-      version: '1.0.0',
-      engine: 'gemini-2.5-flash',
-      hasKey: !!GEMINI_API_KEY
-    }));
+    return res.end(JSON.stringify({ status: 'ok', version: '1.0.0', engine: 'gemini-2.5-flash', hasKey: !!GEMINI_API_KEY }));
   }
 
   if (req.method === 'POST' && url === '/api/review') {
