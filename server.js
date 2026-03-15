@@ -63,7 +63,13 @@ ${code}`;
           const data = JSON.parse(body);
           if (data.error) return reject(new Error(data.error.message));
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          const clean = text.replace(/```json|```/g, '').trim();
+          // Strip markdown, extract just the JSON object
+          let clean = text.replace(/```json|```/gi, '').trim();
+          // Find the JSON object boundaries
+          const start = clean.indexOf('{');
+          const end = clean.lastIndexOf('}');
+          if (start === -1 || end === -1) throw new Error('No JSON found in response');
+          clean = clean.substring(start, end + 1);
           resolve(JSON.parse(clean));
         } catch(e) {
           reject(new Error('Failed to parse Gemini response: ' + e.message));
