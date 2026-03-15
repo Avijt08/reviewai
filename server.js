@@ -21,31 +21,21 @@ function readBody(req) {
   });
 }
 
-function sanitize(str) {
-  if (typeof str !== 'string') return String(str || '');
-  return str
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, ' ')
-    .replace(/\r/g, ' ')
-    .replace(/\t/g, ' ');
-}
-
 function callGemini(code, language) {
   return new Promise(function(resolve, reject) {
     var lang = language || 'JavaScript';
 
-    var prompt = 'Review this ' + lang + ' code. Reply with ONLY a JSON object, no markdown.\n\nIMPORTANT: In all string values use only simple ASCII characters. No newlines, no special characters, no code snippets inside strings.\n\nJSON format:\n{"score":75,"summary":"Brief assessment here","issues":[{"type":"bugs","severity":"high","title":"Issue title","description":"Simple description of the fix"}]}\n\nCode to review:\n' + code.substring(0, 800);
+    var prompt = 'Review this ' + lang + ' code. Reply with ONLY a JSON object, no markdown, no backticks, no explanation before or after.\n\nFormat:\n{"score":75,"summary":"One sentence here","issues":[{"type":"bugs","severity":"high","title":"Short title","description":"Short description"}]}\n\nCode:\n' + code.substring(0, 600);
 
     var payload = JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 800
+        temperature: 0.0,
+        maxOutputTokens: 600
       }
     });
 
-    var path = '/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_API_KEY;
+    var path = '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_API_KEY;
 
     var options = {
       hostname: 'generativelanguage.googleapis.com',
@@ -64,55 +54,41 @@ function callGemini(code, language) {
       res.on('end', function() {
         try {
           var data = JSON.parse(body);
+
+          // Log full response for debugging
+          console.log('=== GEMINI RAW RESPONSE ===');
+          console.log(JSON.stringify(data, null, 2));
+          console.log('===========================');
+
           if (data.error) return reject(new Error(data.error.message));
 
-          var text = data.candidates[0].content.parts[0].text || '';
+          var text = '';
+          if (data.candidates && data.candidates[0]) {
+            var candidate = data.candidates[0];
+            if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
+              text = candidate.content.parts[0].text || '';
+            }
+          }
+
+          console.log('=== EXTRACTED TEXT ===');
+          console.log(text);
+          console.log('======================');
 
           // Strip markdown
           text = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
 
-          // Extract JSON boundaries
+          // Find JSON boundaries
           var start = text.indexOf('{');
           var end = text.lastIndexOf('}');
-          if (start === -1 || end === -1) throw new Error('No JSON found');
-          text = text.substring(start, end + 1);
 
-          // Build safe result by parsing field by field
-          var scoreMatch = text.match(/"score"\s*:\s*(\d+)/);
-          var summaryMatch = text.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-
-          var result = {
-            score: scoreMatch ? parseInt(scoreMatch[1]) : 50,
-            summary: summaryMatch ? summaryMatch[1] : 'Code reviewed.',
-            issues: []
-          };
-
-          // Extract each issue block safely
-          var issueStart = text.indexOf('"issues"');
-          if (issueStart !== -1) {
-            var issueText = text.substring(issueStart);
-            var typeMatches = issueText.match(/"type"\s*:\s*"([^"]+)"/g) || [];
-            var severityMatches = issueText.match(/"severity"\s*:\s*"([^"]+)"/g) || [];
-            var titleMatches = issueText.match(/"title"\s*:\s*"([^"]+)"/g) || [];
-            var descMatches = issueText.match(/"description"\s*:\s*"((?:[^"\\]|\\.)*)"/g) || [];
-
-            var count = Math.min(typeMatches.length, titleMatches.length, 5);
-            for (var i = 0; i < count; i++) {
-              var typeVal = typeMatches[i] ? typeMatches[i].replace(/"type"\s*:\s*"/, '').replace(/"$/, '') : 'style';
-              var sevVal = severityMatches[i] ? severityMatches[i].replace(/"severity"\s*:\s*"/, '').replace(/"$/, '') : 'medium';
-              var titleVal = titleMatches[i] ? titleMatches[i].replace(/"title"\s*:\s*"/, '').replace(/"$/, '') : 'Issue';
-              var descVal = descMatches[i] ? descMatches[i].replace(/"description"\s*:\s*"/, '').replace(/"$/, '') : 'See code for details';
-
-              result.issues.push({
-                type: typeVal,
-                severity: sevVal,
-                title: titleVal,
-                description: descVal
-              });
-            }
+          if (start === -1 || end === -1) {
+            return reject(new Error('No JSON found. Raw text: ' + text.substring(0, 200)));
           }
 
-          resolve(result);
+          text = text.substring(start, end + 1);
+          var parsed = JSON.parse(text);
+          resolve(parsed);
+
         } catch(e) {
           reject(new Error('Parse error: ' + e.message));
         }
@@ -137,7 +113,7 @@ var server = http.createServer(function(req, res) {
 
   if (req.method === 'GET' && url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ status: 'ok', version: '1.0.0', engine: 'gemini-2.5-flash', hasKey: !!GEMINI_API_KEY }));
+    return res.end(JSON.stringify({ status: 'ok', version: '1.0.0', engine: 'gemini-2.0-flash', hasKey: !!GEMINI_API_KEY }));
   }
 
   if (req.method === 'POST' && url === '/api/review') {
@@ -167,6 +143,6 @@ var server = http.createServer(function(req, res) {
 
 server.listen(PORT, '0.0.0.0', function() {
   console.log('ReviewAI API running on port ' + PORT);
-  console.log('Engine: gemini-2.5-flash');
+  console.log('Engine: gemini-2.0-flash');
   console.log('API key set: ' + !!GEMINI_API_KEY);
 });
