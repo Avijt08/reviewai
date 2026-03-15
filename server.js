@@ -21,39 +21,27 @@ function readBody(req) {
   });
 }
 
-function callGemini(code, language, categories) {
+function sanitize(str) {
+  if (typeof str !== 'string') return String(str || '');
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, ' ')
+    .replace(/\r/g, ' ')
+    .replace(/\t/g, ' ');
+}
+
+function callGemini(code, language) {
   return new Promise(function(resolve, reject) {
     var lang = language || 'JavaScript';
 
-    var prompt = 'Review this ' + lang + ' code and identify issues.\n\nCode:\n' + code + '\n\nFor each issue found, classify it as bugs/security/perf/style, with severity high/medium/low. Give an overall quality score 0-100 and a one sentence summary.';
+    var prompt = 'Review this ' + lang + ' code. Reply with ONLY a JSON object, no markdown.\n\nIMPORTANT: In all string values use only simple ASCII characters. No newlines, no special characters, no code snippets inside strings.\n\nJSON format:\n{"score":75,"summary":"Brief assessment here","issues":[{"type":"bugs","severity":"high","title":"Issue title","description":"Simple description of the fix"}]}\n\nCode to review:\n' + code.substring(0, 800);
 
     var payload = JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 1000,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            score: { type: 'INTEGER' },
-            summary: { type: 'STRING' },
-            issues: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: {
-                  type: { type: 'STRING' },
-                  severity: { type: 'STRING' },
-                  title: { type: 'STRING' },
-                  description: { type: 'STRING' }
-                },
-                required: ['type', 'severity', 'title', 'description']
-              }
-            }
-          },
-          required: ['score', 'summary', 'issues']
-        }
+        maxOutputTokens: 800
       }
     });
 
@@ -77,9 +65,54 @@ function callGemini(code, language, categories) {
         try {
           var data = JSON.parse(body);
           if (data.error) return reject(new Error(data.error.message));
+
           var text = data.candidates[0].content.parts[0].text || '';
-          var parsed = JSON.parse(text);
-          resolve(parsed);
+
+          // Strip markdown
+          text = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
+
+          // Extract JSON boundaries
+          var start = text.indexOf('{');
+          var end = text.lastIndexOf('}');
+          if (start === -1 || end === -1) throw new Error('No JSON found');
+          text = text.substring(start, end + 1);
+
+          // Build safe result by parsing field by field
+          var scoreMatch = text.match(/"score"\s*:\s*(\d+)/);
+          var summaryMatch = text.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+
+          var result = {
+            score: scoreMatch ? parseInt(scoreMatch[1]) : 50,
+            summary: summaryMatch ? summaryMatch[1] : 'Code reviewed.',
+            issues: []
+          };
+
+          // Extract each issue block safely
+          var issueStart = text.indexOf('"issues"');
+          if (issueStart !== -1) {
+            var issueText = text.substring(issueStart);
+            var typeMatches = issueText.match(/"type"\s*:\s*"([^"]+)"/g) || [];
+            var severityMatches = issueText.match(/"severity"\s*:\s*"([^"]+)"/g) || [];
+            var titleMatches = issueText.match(/"title"\s*:\s*"([^"]+)"/g) || [];
+            var descMatches = issueText.match(/"description"\s*:\s*"((?:[^"\\]|\\.)*)"/g) || [];
+
+            var count = Math.min(typeMatches.length, titleMatches.length, 5);
+            for (var i = 0; i < count; i++) {
+              var typeVal = typeMatches[i] ? typeMatches[i].replace(/"type"\s*:\s*"/, '').replace(/"$/, '') : 'style';
+              var sevVal = severityMatches[i] ? severityMatches[i].replace(/"severity"\s*:\s*"/, '').replace(/"$/, '') : 'medium';
+              var titleVal = titleMatches[i] ? titleMatches[i].replace(/"title"\s*:\s*"/, '').replace(/"$/, '') : 'Issue';
+              var descVal = descMatches[i] ? descMatches[i].replace(/"description"\s*:\s*"/, '').replace(/"$/, '') : 'See code for details';
+
+              result.issues.push({
+                type: typeVal,
+                severity: sevVal,
+                title: titleVal,
+                description: descVal
+              });
+            }
+          }
+
+          resolve(result);
         } catch(e) {
           reject(new Error('Parse error: ' + e.message));
         }
@@ -117,7 +150,7 @@ var server = http.createServer(function(req, res) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'GEMINI_API_KEY not set' }));
       }
-      callGemini(body.code, body.language, body.categories).then(function(result) {
+      callGemini(body.code, body.language).then(function(result) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, result: result }));
       }).catch(function(e) {
