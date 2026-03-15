@@ -459,6 +459,7 @@ async function runReview() {
     <div class="empty"><div class="spinner" style="width:28px;height:28px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;"></div><span>Reviewing your code...</span></div>`;
 
   const lang = document.getElementById('lang').value;
+  const cats = ['bugs', 'security', 'perf', 'style'];
 
   try {
     const res = await fetch('https://reviewai-production.up.railway.app/api/review', {
