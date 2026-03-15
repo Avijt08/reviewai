@@ -1,95 +1,114 @@
-// ReviewAI - Backend API Server
-// Stack: Node.js + Express + Anthropic SDK
-// Deploy: Vercel (free) or Railway
+const http = require('http');
 
-const express = require('express');
-const cors = require('cors');
-const rateLimit = require('express-rate-limit');
-require('dotenv').config();
+const PORT = process.env.PORT || 3001;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-const app = express();
-app.use(express.json());
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+function setCORS(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
 
-// Rate limiting — free users: 3/day, pro users: unlimited
-const freeLimiter = rateLimit({
-  windowMs: 24 * 60 * 60 * 1000, // 24 hours
-  max: 3,
-  message: { error: 'free_limit_reached', message: 'Upgrade to Pro for unlimited reviews' }
-});
+function parseBody(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try { resolve(JSON.parse(body)); }
+      catch { resolve({}); }
+    });
+  });
+}
 
-// ────────────────────────────────────────────────────────────
-// POST /api/review  — main review endpoint
-// ────────────────────────────────────────────────────────────
-app.post('/api/review', freeLimiter, async (req, res) => {
-  const { code, language, categories } = req.body;
-
-  if (!code || !code.trim()) {
-    return res.status(400).json({ error: 'No code provided' });
-  }
-
+async function reviewCode(code, language, categories) {
   const lang = language || 'JavaScript';
   const cats = categories || ['bugs', 'security', 'perf', 'style'];
 
-  const systemPrompt = `You are an expert ${lang} code reviewer. Analyze the code and return ONLY a JSON object with this structure:
-{
-  "score": <0-100>,
-  "summary": "<one sentence overall assessment>",
-  "issues": [
-    {
-      "type": "<${cats.join('|')}>",
-      "severity": "<high|medium|low>",
-      "title": "<short issue title>",
-      "description": "<specific explanation and fix suggestion>",
-      "line": <line number if applicable, or null>
-    }
-  ]
-}
-Focus on: ${cats.join(', ')}. Include 2-5 most impactful issues. Be specific and actionable. Return ONLY the JSON, no markdown.`;
+  const systemPrompt = `You are an expert ${lang} code reviewer. Analyze the code and return ONLY a JSON object with this structure (no markdown, no backticks, no extra text):
+{"score":<0-100>,"summary":"<one sentence>","issues":[{"type":"<${cats.join('|')}>","severity":"<high|medium|low>","title":"<short title>","description":"<specific fix suggestion>"}]}
+Include 2-5 most impactful issues. Be specific and actionable.`;
 
-  try {
-    // Call Anthropic API
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const body = JSON.stringify({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1000,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: `Review this ${lang} code:\n\n${code}` }]
+  });
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: `Review this ${lang} code:\n\n${code}` }]
-      })
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) return reject(new Error(parsed.error.message));
+          const text = parsed.content?.map(b => b.text || '').join('') || '';
+          const clean = text.replace(/```json|```/g, '').trim();
+          resolve(JSON.parse(clean));
+        } catch(e) { reject(e); }
+      });
     });
 
-    const data = await response.json();
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
 
-    if (data.error) {
-      throw new Error(data.error.message);
+const https = require('https');
+
+const server = http.createServer(async (req, res) => {
+  setCORS(res);
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    return res.end();
+  }
+
+  if (req.method === 'GET' && req.url === '/api/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ status: 'ok', version: '1.0.0' }));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/review') {
+    const body = await parseBody(req);
+
+    if (!body.code || !body.code.trim()) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'No code provided' }));
     }
 
-    const text = data.content?.map(b => b.text || '').join('') || '';
-    const clean = text.replace(/```json|```/g, '').trim();
-    const result = JSON.parse(clean);
+    if (!ANTHROPIC_API_KEY) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'API key not configured' }));
+    }
 
-    res.json({ success: true, result });
-
-  } catch (err) {
-    console.error('Review error:', err.message);
-    res.status(500).json({ error: 'Review failed', message: err.message });
+    try {
+      const result = await reviewCode(body.code, body.language, body.categories);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, result }));
+    } catch(err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Review failed', message: err.message }));
+    }
+    return;
   }
+
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not found' }));
 });
 
-// ────────────────────────────────────────────────────────────
-// GET /api/health  — health check
-// ────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', version: '1.0.0' });
-});
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`ReviewAI API running on port ${PORT}`));
-
-module.exports = app;
+server.listen(PORT, () => console.log(`ReviewAI API running on port ${PORT}`));
