@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ReviewAI — Instant AI Code Reviews</title>
+  <meta name="description" content="Get instant AI-powered code reviews. Catch bugs, security issues, and performance problems before they hit production."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #111111;
+      --surface2: #1a1a1a;
+      --border: #2a2a2a;
+      --border2: #333;
+      --text: #f0f0f0;
+      --muted: #888;
+      --accent: #c8f135;
+      --accent2: #a8d120;
+      --red: #ff4d4d;
+      --amber: #f5a623;
+      --blue: #4d9fff;
+      --purple: #b17cff;
+      --mono: 'DM Mono', monospace;
+      --display: 'Syne', sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { background: var(--bg); color: var(--text); font-family: var(--mono); line-height: 1.6; }
+
+    /* NAV */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 2rem;
+      background: rgba(10,10,10,0.85); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .logo-text { font-family: var(--display); font-weight: 800; font-size: 20px; color: var(--accent); letter-spacing: -0.5px; }
+    .logo-text span { color: var(--text); }
+    .nav-links { display: flex; gap: 1.5rem; align-items: center; }
+    .nav-links a { color: var(--muted); text-decoration: none; font-size: 13px; transition: color 0.2s; }
+    .nav-links a:hover { color: var(--text); }
+    .nav-cta {
+      background: var(--accent); color: #0a0a0a; font-family: var(--display);
+      font-weight: 700; font-size: 13px; padding: 8px 18px;
+      border-radius: 6px; text-decoration: none; transition: background 0.2s;
+    }
+    .nav-cta:hover { background: var(--accent2); color: #0a0a0a !important; }
+
+    /* HERO */
+    .hero {
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 8rem 2rem 4rem; text-align: center;
+      position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 50% 30%, rgba(200,241,53,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      border: 1px solid var(--border2); border-radius: 999px;
+      padding: 5px 14px; font-size: 12px; color: var(--muted);
+      margin-bottom: 2rem; animation: fadeUp 0.6s ease both;
+    }
+    .hero-badge span { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; display: inline-block; animation: pulse 2s ease infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+    h1 {
+      font-family: var(--display); font-weight: 800; font-size: clamp(2.8rem, 7vw, 5.5rem);
+      line-height: 1.0; letter-spacing: -2px; margin-bottom: 1.5rem;
+      animation: fadeUp 0.6s 0.1s ease both;
+    }
+    h1 em { font-style: normal; color: var(--accent); }
+    .hero-sub {
+      font-size: clamp(15px, 2vw, 18px); color: var(--muted); max-width: 540px;
+      line-height: 1.7; margin-bottom: 2.5rem;
+      animation: fadeUp 0.6s 0.2s ease both;
+    }
+    .hero-actions {
+      display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+      animation: fadeUp 0.6s 0.3s ease both;
+    }
+    .btn-primary {
+      background: var(--accent); color: #0a0a0a; font-family: var(--display);
+      font-weight: 700; font-size: 15px; padding: 14px 32px;
+      border-radius: 8px; text-decoration: none; border: none; cursor: pointer;
+      transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px;
+    }
+    .btn-primary:hover { background: var(--accent2); transform: translateY(-1px); }
+    .btn-secondary {
+      background: transparent; color: var(--text); font-family: var(--display);
+      font-weight: 600; font-size: 15px; padding: 14px 32px;
+      border-radius: 8px; text-decoration: none; border: 1px solid var(--border2); cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--text); }
+    .hero-stats {
+      display: flex; gap: 3rem; margin-top: 4rem;
+      animation: fadeUp 0.6s 0.4s ease both;
+    }
+    .stat { text-align: center; }
+    .stat-num { font-family: var(--display); font-size: 28px; font-weight: 800; color: var(--text); }
+    .stat-label { font-size: 12px; color: var(--muted); }
+
+    /* DEMO SECTION */
+    .section { padding: 5rem 2rem; max-width: 1100px; margin: 0 auto; }
+    .section-label { font-size: 12px; color: var(--accent); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 1rem; }
+    .section-title { font-family: var(--display); font-size: clamp(2rem, 4vw, 3rem); font-weight: 800; letter-spacing: -1px; margin-bottom: 1rem; }
+    .section-sub { color: var(--muted); font-size: 15px; max-width: 500px; line-height: 1.7; }
+
+    /* APP */
+    .app-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; margin-top: 3rem; }
+    .app-bar {
+      display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+      background: var(--surface2); border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 12px; height: 12px; border-radius: 50%; }
+    .app-body { display: grid; grid-template-columns: 1fr 1fr; min-height: 460px; }
+    .pane { padding: 1.5rem; }
+    .pane-left { border-right: 1px solid var(--border); }
+    .pane-label { font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+    .lang-sel {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer;
+    }
+    .code-area {
+      width: 100%; min-height: 320px; background: #0d0d0d;
+      border: 1px solid var(--border); border-radius: 8px;
+      color: #c9d1d9; font-family: var(--mono); font-size: 13px;
+      padding: 12px; resize: vertical; line-height: 1.6;
+      outline: none; transition: border-color 0.2s;
+    }
+    .code-area:focus { border-color: var(--accent); }
+    .review-btn {
+      margin-top: 12px; width: 100%; padding: 12px;
+      background: var(--accent); color: #0a0a0a;
+      font-family: var(--display); font-weight: 700; font-size: 14px;
+      border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .review-btn:hover:not(:disabled) { background: var(--accent2); }
+    .review-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .results-pane { overflow-y: auto; }
+    .issue-card { background: var(--surface2); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; border-left: 3px solid var(--border2); }
+    .issue-card.high { border-left-color: var(--red); }
+    .issue-card.medium { border-left-color: var(--amber); }
+    .issue-card.low { border-left-color: var(--blue); }
+    .issue-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .tag { font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 500; }
+    .tag.bugs { background: rgba(255,77,77,0.15); color: var(--red); }
+    .tag.security { background: rgba(245,166,35,0.15); color: var(--amber); }
+    .tag.perf { background: rgba(77,159,255,0.15); color: var(--blue); }
+    .tag.style { background: rgba(177,124,255,0.15); color: var(--purple); }
+    .issue-title { font-size: 13px; font-weight: 500; color: var(--text); }
+    .issue-desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+    .score-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; padding: 10px 14px; background: var(--surface2); border-radius: 8px; }
+    .score-num { font-family: var(--display); font-size: 28px; font-weight: 800; }
+    .score-good { color: var(--accent); }
+    .score-mid { color: var(--amber); }
+    .score-bad { color: var(--red); }
+    .score-info { flex: 1; }
+    .score-title { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
+    .score-sub { font-size: 12px; color: var(--muted); }
+    .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 13px; gap: 8px; }
+    .empty-icon { font-size: 32px; opacity: 0.3; }
+    .spinner { width: 18px; height: 18px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* FEATURES */
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; margin-top: 3rem; }
+    .feature { background: var(--surface); padding: 2rem; transition: background 0.2s; }
+    .feature:hover { background: var(--surface2); }
+    .feature-icon { font-size: 28px; margin-bottom: 1rem; }
+    .feature-title { font-family: var(--display); font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+    .feature-desc { font-size: 13px; color: var(--muted); line-height: 1.7; }
+
+    /* PRICING */
+    .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 3rem; }
+    .plan { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 2rem; position: relative; }
+    .plan.popular { border-color: var(--accent); }
+    .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #0a0a0a; font-family: var(--display); font-weight: 700; font-size: 11px; padding: 4px 14px; border-radius: 999px; }
+    .plan-name { font-family: var(--display); font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+    .plan-price { font-family: var(--display); font-size: 36px; font-weight: 800; margin-bottom: 4px; }
+    .plan-price span { font-size: 14px; color: var(--muted); font-weight: 400; }
+    .plan-sub { font-size: 12px; color: var(--muted); margin-bottom: 1.5rem; }
+    .plan-features { list-style: none; margin-bottom: 1.5rem; }
+    .plan-features li { font-size: 13px; color: var(--muted); padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+    .plan-features li::before { content: '✓'; color: var(--accent); font-weight: 700; }
+    .plan-btn { width: 100%; padding: 12px; border-radius: 8px; font-family: var(--display); font-weight: 700; font-size: 14px; cursor: pointer; transition: all 0.2s; text-align: center; text-decoration: none; display: block; border: 1px solid var(--border2); background: transparent; color: var(--text); }
+    .plan.popular .plan-btn { background: var(--accent); color: #0a0a0a; border-color: var(--accent); }
+    .plan-btn:hover { transform: translateY(-1px); }
+
+    /* HOW IT WORKS */
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 2rem; margin-top: 3rem; position: relative; }
+    .step { text-align: center; }
+    .step-num { font-family: var(--display); font-size: 48px; font-weight: 800; color: var(--border2); line-height: 1; margin-bottom: 1rem; }
+    .step-title { font-family: var(--display); font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+    .step-desc { font-size: 13px; color: var(--muted); line-height: 1.7; }
+
+    /* FOOTER */
+    footer { border-top: 1px solid var(--border); padding: 2rem; text-align: center; color: var(--muted); font-size: 12px; }
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--text); }
+
+    /* FREE TRIAL BANNER */
+    .trial-banner { background: linear-gradient(135deg, rgba(200,241,53,0.1), rgba(200,241,53,0.03)); border: 1px solid rgba(200,241,53,0.3); border-radius: 16px; padding: 3rem; text-align: center; margin-top: 3rem; }
+    .trial-title { font-family: var(--display); font-size: 2rem; font-weight: 800; margin-bottom: 1rem; }
+    .trial-sub { color: var(--muted); font-size: 14px; margin-bottom: 2rem; }
+
+    @media (max-width: 768px) {
+      .app-body { grid-template-columns: 1fr; }
+      .pane-left { border-right: none; border-bottom: 1px solid var(--border); }
+      .hero-stats { gap: 2rem; }
+      nav { padding: 1rem; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a class="logo" href="#">
+    <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="34" height="34" rx="9" fill="#c8f135"/>
+      <path d="M11 12 L6 17 L11 22" stroke="#0a0a0a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <path d="M23 12 L28 17 L23 22" stroke="#0a0a0a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <path d="M14 17 L16.2 19.2 L20 14.5" stroke="#0a0a0a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+    <span class="logo-text">Review<span>AI</span></span>
+  </a>
+  <div class="nav-links">
+    <a href="#demo">Demo</a>
+    <a href="#features">Features</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#how">How it works</a>
+    <a href="#pricing" class="nav-cta">Get Started Free</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge"><span></span> AI-Powered · Instant · Accurate</div>
+  <h1>Ship <em>cleaner</em> code,<br/>faster than ever.</h1>
+  <p class="hero-sub">ReviewAI catches bugs, security holes, and performance issues in seconds — before they hit production.</p>
+  <div class="hero-actions">
+    <a href="#demo" class="btn-primary">Try it free →</a>
+    <a href="#pricing" class="btn-secondary">See pricing</a>
+  </div>
+  <div class="hero-stats">
+    <div class="stat"><div class="stat-num">3s</div><div class="stat-label">avg review time</div></div>
+    <div class="stat"><div class="stat-num">12+</div><div class="stat-label">languages</div></div>
+    <div class="stat"><div class="stat-num">4</div><div class="stat-label">review categories</div></div>
+  </div>
+</section>
+
+<!-- DEMO -->
+<section id="demo" style="padding: 4rem 2rem; max-width: 1100px; margin: 0 auto;">
+  <div class="section-label">Live Demo</div>
+  <div class="section-title">Try it right now</div>
+  <p class="section-sub">Paste your code below and get a full review in seconds. No signup needed.</p>
+
+  <div class="app-wrap">
+    <div class="app-bar">
+      <div class="dot" style="background:#ff5f57"></div>
+      <div class="dot" style="background:#febc2e"></div>
+      <div class="dot" style="background:#28c840"></div>
+      <span style="font-size:12px; color: var(--muted); margin-left:8px;">ReviewAI — Code Review Agent</span>
+    </div>
+    <div class="app-body">
+      <div class="pane pane-left">
+        <div class="pane-label">
+          Your Code
+          <select class="lang-sel" id="lang">
+            <option>JavaScript</option>
+            <option>Python</option>
+            <option>TypeScript</option>
+            <option>Java</option>
+            <option>Go</option>
+            <option>Rust</option>
+          </select>
+        </div>
+        <textarea class="code-area" id="codeInput" placeholder="// Paste your code here...
+function getUser(id) {
+  const query = 'SELECT * FROM users WHERE id = ' + id;
+  db.execute(query);
+  var password = '12345';
+  for(var i=0;i<1000000;i++) { }
+  return query;
+}"></textarea>
+        <button class="review-btn" id="reviewBtn" onclick="runReview()">
+          <span id="btnContent">&#9654; Review My Code</span>
+        </button>
+        <div style="font-size:11px; color:var(--muted); text-align:center; margin-top:8px;" id="freeCounter">3 free reviews remaining</div>
+      </div>
+      <div class="pane results-pane" id="resultsPane">
+        <div class="empty">
+          <div class="empty-icon">⟳</div>
+          <span>Paste code and click Review</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features" class="section">
+  <div class="section-label">What we check</div>
+  <div class="section-title">Every angle, covered.</div>
+  <p class="section-sub">ReviewAI doesn't just look for typos — it understands your code like a senior engineer.</p>
+  <div class="features-grid">
+    <div class="feature">
+      <div class="feature-icon">🐛</div>
+      <div class="feature-title">Bug Detection</div>
+      <div class="feature-desc">Null pointer errors, off-by-one mistakes, unhandled edge cases — caught before they crash your app.</div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">🔒</div>
+      <div class="feature-title">Security Audit</div>
+      <div class="feature-desc">SQL injection, XSS vulnerabilities, exposed secrets, insecure dependencies — found instantly.</div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">⚡</div>
+      <div class="feature-title">Performance</div>
+      <div class="feature-desc">N+1 queries, memory leaks, inefficient loops — optimized so your app runs blazing fast.</div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">✨</div>
+      <div class="feature-title">Code Style</div>
+      <div class="feature-desc">Clean, readable, maintainable code suggestions aligned with industry best practices.</div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">🌐</div>
+      <div class="feature-title">12+ Languages</div>
+      <div class="feature-desc">JS, Python, TypeScript, Go, Rust, Java, C++, PHP and more — one tool for your whole stack.</div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">📊</div>
+      <div class="feature-title">Quality Score</div>
+      <div class="feature-desc">Every review gives you a 0–100 quality score so you can track improvement over time.</div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section id="how" class="section">
+  <div class="section-label">Process</div>
+  <div class="section-title">Simple as 1, 2, 3.</div>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">01</div>
+      <div class="step-title">Paste your code</div>
+      <div class="step-desc">Drop any code snippet, function, or file into the editor. Supports all major languages.</div>
+    </div>
+    <div class="step">
+      <div class="step-num">02</div>
+      <div class="step-title">AI reviews it</div>
+      <div class="step-desc">Our AI, powered by Claude, analyzes for bugs, security, performance, and style in seconds.</div>
+    </div>
+    <div class="step">
+      <div class="step-num">03</div>
+      <div class="step-title">Fix & ship</div>
+      <div class="step-desc">Get actionable, specific suggestions. Fix issues. Ship confidently.</div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section id="pricing" class="section">
+  <div class="section-label">Pricing</div>
+  <div class="section-title">Simple, honest pricing.</div>
+  <p class="section-sub">Start free. Upgrade when you love it.</p>
+  <div class="pricing-grid">
+    <div class="plan">
+      <div class="plan-name">Free</div>
+      <div class="plan-price">₹0 <span>/ forever</span></div>
+      <div class="plan-sub">For trying it out</div>
+      <ul class="plan-features">
+        <li>3 reviews per day</li>
+        <li>Bug + Security checks</li>
+        <li>All languages</li>
+        <li>Quality score</li>
+      </ul>
+      <a href="#demo" class="plan-btn">Start Free</a>
+    </div>
+    <div class="plan popular">
+      <div class="popular-badge">Most Popular</div>
+      <div class="plan-name">Pro</div>
+      <div class="plan-price">₹499 <span>/ month</span></div>
+      <div class="plan-sub">For individual developers</div>
+      <ul class="plan-features">
+        <li>Unlimited reviews</li>
+        <li>All 4 review categories</li>
+        <li>Review history</li>
+        <li>Priority support</li>
+        <li>Export as PDF</li>
+      </ul>
+      <a href="https://gumroad.com" target="_blank" class="plan-btn">Get Pro →</a>
+    </div>
+    <div class="plan">
+      <div class="plan-name">Team</div>
+      <div class="plan-price">₹2,999 <span>/ month</span></div>
+      <div class="plan-sub">For dev teams up to 10</div>
+      <ul class="plan-features">
+        <li>Everything in Pro</li>
+        <li>10 team seats</li>
+        <li>Team dashboard</li>
+        <li>GitHub integration</li>
+        <li>Slack notifications</li>
+      </ul>
+      <a href="/cdn-cgi/l/email-protection#4e262b2222210e3c2b38272b392f27602a2b38" class="plan-btn">Contact Us</a>
+    </div>
+  </div>
+
+  <div class="trial-banner">
+    <div class="trial-title">Ready to write better code?</div>
+    <div class="trial-sub">Join developers who ship cleaner, safer code every day.</div>
+    <a href="#demo" class="btn-primary">Try ReviewAI free — no signup needed →</a>
+  </div>
+</section>
+
+<footer>
+  <p style="margin-bottom:8px;">
+    <a href="#">Privacy</a> · <a href="#">Terms</a> · <a href="/cdn-cgi/l/email-protection#c1a9a4adadae81b3a4b7a8a4b6a0a8efa5a4b7">Contact</a>
+  </p>
+  <p>© 2025 ReviewAI · Built with Claude AI</p>
+</footer>
+
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+let freeReviews = parseInt(localStorage.getItem('freeReviews') || '3');
+document.getElementById('freeCounter').textContent = freeReviews + ' free reviews remaining';
+
+async function runReview() {
+  const code = document.getElementById('codeInput').value.trim();
+  if (!code) return;
+
+  if (freeReviews <= 0) {
+    document.getElementById('resultsPane').innerHTML = `
+      <div style="padding:2rem; text-align:center;">
+        <div style="font-size:32px; margin-bottom:1rem;">🔒</div>
+        <div style="font-family:var(--display); font-size:18px; font-weight:700; margin-bottom:8px;">Free reviews used up</div>
+        <div style="color:var(--muted); font-size:13px; margin-bottom:1.5rem;">Upgrade to Pro for unlimited reviews</div>
+        <a href="#pricing" style="background:var(--accent); color:#0a0a0a; font-family:var(--display); font-weight:700; font-size:14px; padding:12px 28px; border-radius:8px; text-decoration:none;">Upgrade to Pro →</a>
+      </div>`;
+    return;
+  }
+
+  const btn = document.getElementById('reviewBtn');
+  btn.disabled = true;
+  document.getElementById('btnContent').innerHTML = '<span class="spinner" style="display:inline-block; width:16px; height:16px; border:2px solid rgba(0,0,0,0.2); border-top-color:#0a0a0a; border-radius:50%; animation:spin 0.7s linear infinite; vertical-align:middle; margin-right:8px;"></span>Analyzing...';
+
+  document.getElementById('resultsPane').innerHTML = `
+    <div class="empty"><div class="spinner" style="width:28px;height:28px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;"></div><span>Reviewing your code...</span></div>`;
+
+  const lang = document.getElementById('lang').value;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: `You are an expert code reviewer. Analyze the given ${lang} code and return ONLY a JSON object (no markdown, no backticks, no extra text) with this exact structure:
+{"score":<0-100>,"summary":"<one sentence>","issues":[{"type":"<bugs|security|perf|style>","severity":"<high|medium|low>","title":"<short title>","description":"<specific fix suggestion>"}]}
+Include 2-5 most important issues. Be specific and actionable.`,
+        messages: [{ role: 'user', content: `Review this ${lang} code:\n\n${code}` }]
+      })
+    });
+
+    const data = await res.json();
+    const text = data.content?.map(i => i.text || '').join('') || '';
+    const clean = text.replace(/```json|```/g, '').trim();
+    const result = JSON.parse(clean);
+
+    freeReviews--;
+    localStorage.setItem('freeReviews', freeReviews);
+    document.getElementById('freeCounter').textContent = freeReviews + ' free reviews remaining';
+
+    renderResults(result);
+  } catch(e) {
+    document.getElementById('resultsPane').innerHTML = `<div class="empty"><span style="color:var(--red)">Review failed. Check your API key or try again.</span></div>`;
+  }
+
+  btn.disabled = false;
+  document.getElementById('btnContent').innerHTML = '&#9654; Review My Code';
+}
+
+function renderResults(data) {
+  const scoreClass = data.score >= 75 ? 'score-good' : data.score >= 50 ? 'score-mid' : 'score-bad';
+  let html = `<div class="score-bar">
+    <div class="score-num ${scoreClass}">${data.score}</div>
+    <div class="score-info">
+      <div class="score-title">Quality Score</div>
+      <div class="score-sub">${data.summary}</div>
+    </div>
+  </div>`;
+
+  if (!data.issues?.length) {
+    html += `<div class="empty"><span style="color:var(--accent)">✓ No issues found!</span></div>`;
+  } else {
+    for (const issue of data.issues) {
+      html += `<div class="issue-card ${issue.severity}">
+        <div class="issue-top">
+          <span class="tag ${issue.type}">${issue.type}</span>
+          <span class="issue-title">${issue.title}</span>
+        </div>
+        <div class="issue-desc">${issue.description}</div>
+      </div>`;
+    }
+  }
+
+  if (freeReviews <= 0) {
+    html += `<div style="margin-top:12px; padding:12px; border:1px solid rgba(200,241,53,0.3); border-radius:8px; text-align:center;">
+      <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Free reviews used up</div>
+      <a href="#pricing" style="background:var(--accent); color:#0a0a0a; font-family:var(--display); font-weight:700; font-size:12px
