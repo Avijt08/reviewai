@@ -2,7 +2,7 @@ const https = require('https');
 const http = require('http');
 
 const PORT = process.env.PORT || 8080;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 
 function setCORS(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -21,29 +21,33 @@ function readBody(req) {
   });
 }
 
-function callGemini(code, language) {
+function callGroq(code, language) {
   return new Promise(function(resolve, reject) {
     var lang = language || 'JavaScript';
 
-    var prompt = 'Review this ' + lang + ' code. Reply with ONLY a JSON object, no markdown, no backticks, no explanation before or after.\n\nFormat:\n{"score":75,"summary":"One sentence here","issues":[{"type":"bugs","severity":"high","title":"Short title","description":"Short description"}]}\n\nCode:\n' + code.substring(0, 600);
+    var systemPrompt = 'You are a code reviewer. You MUST respond with ONLY a valid JSON object. No markdown. No backticks. No text before or after. Just the raw JSON.\n\nJSON structure:\n{"score":<0-100>,"summary":"one sentence","issues":[{"type":"bugs|security|perf|style","severity":"high|medium|low","title":"short title","description":"fix suggestion"}]}';
+
+    var userPrompt = 'Review this ' + lang + ' code and return JSON only:\n\n' + code.substring(0, 800);
 
     var payload = JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.0,
-        maxOutputTokens: 600
-      }
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.1,
+      max_tokens: 800,
+      response_format: { type: 'json_object' }
     });
 
-    var path = '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_API_KEY;
-
     var options = {
-      hostname: 'generativelanguage.googleapis.com',
+      hostname: 'api.groq.com',
       port: 443,
-      path: path,
+      path: '/openai/v1/chat/completions',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + GROQ_API_KEY,
         'Content-Length': Buffer.byteLength(payload)
       }
     };
@@ -54,41 +58,12 @@ function callGemini(code, language) {
       res.on('end', function() {
         try {
           var data = JSON.parse(body);
-
-          // Log full response for debugging
-          console.log('=== GEMINI RAW RESPONSE ===');
-          console.log(JSON.stringify(data, null, 2));
-          console.log('===========================');
-
+          console.log('Groq response status:', res.statusCode);
           if (data.error) return reject(new Error(data.error.message));
-
-          var text = '';
-          if (data.candidates && data.candidates[0]) {
-            var candidate = data.candidates[0];
-            if (candidate.content && candidate.content.parts && candidate.content.parts[0]) {
-              text = candidate.content.parts[0].text || '';
-            }
-          }
-
-          console.log('=== EXTRACTED TEXT ===');
-          console.log(text);
-          console.log('======================');
-
-          // Strip markdown
-          text = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
-
-          // Find JSON boundaries
-          var start = text.indexOf('{');
-          var end = text.lastIndexOf('}');
-
-          if (start === -1 || end === -1) {
-            return reject(new Error('No JSON found. Raw text: ' + text.substring(0, 200)));
-          }
-
-          text = text.substring(start, end + 1);
+          var text = data.choices[0].message.content || '';
+          console.log('Groq text:', text.substring(0, 200));
           var parsed = JSON.parse(text);
           resolve(parsed);
-
         } catch(e) {
           reject(new Error('Parse error: ' + e.message));
         }
@@ -113,7 +88,7 @@ var server = http.createServer(function(req, res) {
 
   if (req.method === 'GET' && url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ status: 'ok', version: '1.0.0', engine: 'gemini-2.0-flash', hasKey: !!GEMINI_API_KEY }));
+    return res.end(JSON.stringify({ status: 'ok', version: '1.0.0', engine: 'llama-3.3-70b (groq)', hasKey: !!GROQ_API_KEY }));
   }
 
   if (req.method === 'POST' && url === '/api/review') {
@@ -122,11 +97,11 @@ var server = http.createServer(function(req, res) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'No code provided' }));
       }
-      if (!GEMINI_API_KEY) {
+      if (!GROQ_API_KEY) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'GEMINI_API_KEY not set' }));
+        return res.end(JSON.stringify({ error: 'GROQ_API_KEY not set in Railway variables' }));
       }
-      callGemini(body.code, body.language).then(function(result) {
+      callGroq(body.code, body.language).then(function(result) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, result: result }));
       }).catch(function(e) {
@@ -143,6 +118,6 @@ var server = http.createServer(function(req, res) {
 
 server.listen(PORT, '0.0.0.0', function() {
   console.log('ReviewAI API running on port ' + PORT);
-  console.log('Engine: gemini-2.0-flash');
-  console.log('API key set: ' + !!GEMINI_API_KEY);
+  console.log('Engine: llama-3.3-70b via Groq (Free)');
+  console.log('API key set: ' + !!GROQ_API_KEY);
 });
