@@ -2,12 +2,12 @@ const https = require('https');
 const http = require('http');
 
 const PORT = process.env.PORT || 8080;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 function setCORS(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
 function readBody(req) {
@@ -21,30 +21,37 @@ function readBody(req) {
   });
 }
 
-function callAnthropic(code, language, categories) {
+function callGemini(code, language, categories) {
   return new Promise((resolve, reject) => {
     const lang = language || 'JavaScript';
     const cats = (categories || ['bugs','security','perf','style']).join('|');
 
-    const system = `You are an expert ${lang} code reviewer. Return ONLY valid JSON, no markdown, no backticks, no extra text. Use this exact structure: {"score":<number 0-100>,"summary":"<string>","issues":[{"type":"<${cats}>","severity":"<high|medium|low>","title":"<string>","description":"<string>"}]}. Give 2-5 issues.`;
+    const prompt = `You are an expert ${lang} code reviewer. Analyze the following code and return ONLY valid JSON with no markdown, no backticks, no extra text whatsoever. Use exactly this structure:
+{"score":<number 0-100>,"summary":"<one sentence assessment>","issues":[{"type":"<${cats}>","severity":"<high|medium|low>","title":"<short title>","description":"<specific fix suggestion>"}]}
+
+Give 2-5 most important issues. Be specific and actionable.
+
+Code to review:
+${code}`;
 
     const payload = JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: system,
-      messages: [{ role: 'user', content: `Review this ${lang} code:\n\n${code}` }]
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 1000
+      }
     });
 
+    const path = `/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
     const options = {
-      hostname: 'api.anthropic.com',
+      hostname: 'generativelanguage.googleapis.com',
       port: 443,
-      path: '/v1/messages',
+      path: path,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload),
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
+        'Content-Length': Buffer.byteLength(payload)
       }
     };
 
@@ -55,11 +62,11 @@ function callAnthropic(code, language, categories) {
         try {
           const data = JSON.parse(body);
           if (data.error) return reject(new Error(data.error.message));
-          const text = (data.content || []).map(b => b.text || '').join('');
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
           const clean = text.replace(/```json|```/g, '').trim();
           resolve(JSON.parse(clean));
         } catch(e) {
-          reject(new Error('Failed to parse response: ' + e.message));
+          reject(new Error('Failed to parse Gemini response: ' + e.message));
         }
       });
     });
@@ -80,38 +87,31 @@ const server = http.createServer(async (req, res) => {
 
   const url = req.url.split('?')[0];
 
-  // Health check
   if (req.method === 'GET' && url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({
       status: 'ok',
       version: '1.0.0',
-      hasKey: !!ANTHROPIC_API_KEY
+      engine: 'gemini-2.5-flash',
+      hasKey: !!GEMINI_API_KEY
     }));
   }
 
-  // Review endpoint
   if (req.method === 'POST' && url === '/api/review') {
-    let body;
-    try {
-      body = await readBody(req);
-    } catch(e) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: 'Invalid request body' }));
-    }
+    const body = await readBody(req);
 
     if (!body.code || !body.code.trim()) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: 'No code provided' }));
     }
 
-    if (!ANTHROPIC_API_KEY) {
+    if (!GEMINI_API_KEY) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: 'ANTHROPIC_API_KEY not set in Railway variables' }));
+      return res.end(JSON.stringify({ error: 'GEMINI_API_KEY not set in Railway variables' }));
     }
 
     try {
-      const result = await callAnthropic(body.code, body.language, body.categories);
+      const result = await callGemini(body.code, body.language, body.categories);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: true, result }));
     } catch(e) {
@@ -126,5 +126,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`ReviewAI API running on port ${PORT}`);
-  console.log(`API key set: ${!!ANTHROPIC_API_KEY}`);
+  console.log(`Engine: Gemini 2.0 Flash (Free)`);
+  console.log(`API key set: ${!!GEMINI_API_KEY}`);
 });
