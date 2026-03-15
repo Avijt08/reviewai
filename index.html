@@ -461,23 +461,19 @@ async function runReview() {
   const lang = document.getElementById('lang').value;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('https://reviewai-production.up.railway.app/api/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: `You are an expert code reviewer. Analyze the given ${lang} code and return ONLY a JSON object (no markdown, no backticks, no extra text) with this exact structure:
-{"score":<0-100>,"summary":"<one sentence>","issues":[{"type":"<bugs|security|perf|style>","severity":"<high|medium|low>","title":"<short title>","description":"<specific fix suggestion>"}]}
-Include 2-5 most important issues. Be specific and actionable.`,
-        messages: [{ role: 'user', content: `Review this ${lang} code:\n\n${code}` }]
+        code: code,
+        language: lang,
+        categories: cats
       })
     });
 
     const data = await res.json();
-    const text = data.content?.map(i => i.text || '').join('') || '';
-    const clean = text.replace(/```json|```/g, '').trim();
-    const result = JSON.parse(clean);
+    if (!data.success) throw new Error(data.message || 'Review failed');
+    const result = data.result;
 
     freeReviews--;
     localStorage.setItem('freeReviews', freeReviews);
